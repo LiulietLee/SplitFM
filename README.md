@@ -46,56 +46,7 @@ We have verified in the environment below:
 
 <i>Note: You still need the original pre-trained checkpoint from [Hugging Face](https://huggingface.co/) to use the LoRA checkpoints.</i>
 
-##### 1.2 Quick Start
-1. Installing `loralib` is simply
-
- ```python
- pip install loralib
- # Alternatively
- # pip install git+https://github.com/microsoft/LoRA
- ```
-
- 2. You can choose to adapt some layers by replacing them with counterparts implemented in `loralib`. We only support `nn.Linear`, `nn.Embedding`, and `nn.Conv2d` for now. We also support a `MergedLinear` for cases where a single `nn.Linear` represents more than one layers, such as in some implementations of the attention `qkv` projection (see Additional Notes for more).
-
- ```python
- # ===== Before =====
- # layer = nn.Linear(in_features, out_features)
-
- # ===== After ======
- import loralib as lora
- # Add a pair of low-rank adaptation matrices with rank r=16
- layer = lora.Linear(in_features, out_features, r=16)
- ```
-
- 3. Before the training loop begins, mark only LoRA parameters as trainable.
-
- ```python
- import loralib as lora
- model = BigModel()
- # This sets requires_grad to False for all parameters without the string "lora_" in their names
- lora.mark_only_lora_as_trainable(model)
- # Training loop
- for batch in dataloader:
-    ...
- ```
- 4. When saving a checkpoint, generate a `state_dict` that only contains LoRA parameters.
-
- ```python
- # ===== Before =====
- # torch.save(model.state_dict(), checkpoint_path)
- # ===== After =====
- torch.save(lora.lora_state_dict(model), checkpoint_path)
- ```
- 5. When loading a checkpoint using `load_state_dict`, be sure to set `strict=False`.
-
- ```python
- # Load the pretrained checkpoint first
- model.load_state_dict(torch.load('ckpt_pretrained.pt'), strict=False)
- # Then load the LoRA checkpoint
- model.load_state_dict(torch.load('ckpt_lora.pt'), strict=False)
- ```
-
-##### 1.3 Installation
+##### 1.2 Installation
 
 1. Clone the repo and set up the environment.
 
@@ -139,67 +90,32 @@ There are several directories in this repo:
 * [data/](data) contains the raw data we used in our experiments.
 * [vocab/](vocab) contains the GPT-2 vocabulary files.
 
-##### 2.2 Hyper-Parameter  
+##### 2.2 Key Hyper-Parameters
 
+| Argument             | Description                                                  | Default                                                      |
+| :------------------- | :----------------------------------------------------------- | :----------------------------------------------------------- |
+| `--train_batch_size` | Training batch size.                                         | `4`                                                          |
+| `--grad_acc`         | Number of gradient accumulation steps.                       | `1`                                                          |
+| ` --seq_len`         | Sequence length.                                             | ` 512`                                                       |
+| `--model_card`       | Path to the model configuration file.                        | `gpt2.md`                                                    |
+| `--init_checkpoint`  | Path to the initial checkpoint file for model initialization. | `./pretrained_checkpoints/gpt2-medium-pytorch_model.bin.bin.` |
+| `--platform`         | Execution platform.                                          | `local`                                                      |
+| `--lr`               | Learning rate.                                               | `0.0002`                                                     |
+| `--max_epoch`        | Maximum number of training epochs.                           | `5`                                                          |
+| `--lora_dim`         | The dimension of LoRA (Local-Regional Attention).            | `4`                                                          |
+| `--lora_alpha`       | Alpha hyperparameter for LoRA.                               | `32`                                                         |
+| `--lora_dropout`     | Dropout rate for LoRA.                                       | `0.1`                                                        |
+| `--work_dir`         | Working directory where the models and log files are saved.  | `./trained_models/GPT2_M/e2e`                                |
 
-```python
- --nproc_per_node=1: Specifies the number of processes per node, set to 1 here.
+For a full list of arguments, please refer to the source code arguments parser.
 
---train_data: Specifies the path to the training data, set to ./data/e2e/train0.jsonl,train1.jsonl,train2.jsonl.
-
---valid_data: Specifies the path to the validation data, set to ./data/e2e/valid.jsonl.
-
---train_batch_size: Specifies the training batch size, set to 8.
-
---grad_acc: Specifies the number of gradient accumulation steps, set to 1, which means the gradient is updated once per batch.
-
---valid_batch_size: Specifies the validation batch size, set to 4.
-
---seq_len: Specifies the sequence length, set to 512.
-
---model_card: Specifies the path to the model configuration file, set to gpt2.md.
-
---init_checkpoint: Specifies the path to the initial checkpoint file for model initialization, set to ./pretrained_checkpoints/gpt2-pytorch_model.bin.
-
---platform: Specifies the execution platform, set to local.
-
---clip: Specifies the threshold for gradient clipping, set to 0.0, which means no gradient clipping is performed.
-
---lr: Specifies the learning rate, set to 0.0002.
-
---weight_decay: Specifies the weight decay (L2 regularization) parameter, set to 0.01.
-
---correct_bias: Specifies whether to correct biases, default is False.
-
---adam_beta2: Specifies the beta2 parameter for the Adam optimizer, set to 0.999.
-
---scheduler: Specifies the type of learning rate scheduler, set to linear.
-
---warmup_step: Specifies the number of warm-up steps for linear learning rate warm-up, set to 500.
-
---max_epoch: Specifies the maximum number of training epochs, set to 5.
-
---save_interval: Specifies the interval steps for model saving, set to 1000.
-
---lora_dim: Specifies the dimension of LoRA (Local-Regional Attention), set to 4.
-
---lora_alpha: Specifies the alpha hyperparameter for LoRA, set to 32.
-
---lora_dropout: Specifies the dropout rate for LoRA, set to 0.1.
-
---label_smooth: Specifies the label smoothing parameter, set to 0.1.
-
---work_dir: Specifies the working directory where the models and log files are saved, set to ./trained_models/GPT2_S/e2e.
-
---random_seed: Specifies the random seed, set to 110.
-```
 #### 3  Training Process
 
 1. Train GPT-2 Medium with SplitLoRA  
 
-At examples/NLG, run:
+In the `examples` directory, run:
 
-```python
+```bash
 python -m torch.distributed.launch --nproc_per_node=1 --use_env src/gpt2_ft_sfl.py \
 --train_data0 ./data/e2e/train0.jsonl \
 --train_data1 ./data/e2e/train1.jsonl \
@@ -221,7 +137,7 @@ python -m torch.distributed.launch --nproc_per_node=1 --use_env src/gpt2_ft_sfl.
 --warmup_step 500 \
 --max_epoch 5 \
 --save_interval 400000 \
---lora_dim 2 \
+--lora_dim 4 \
 --lora_alpha 32 \
 --lora_dropout 0.1 \
 --label_smooth 0.1 \
@@ -231,14 +147,14 @@ python -m torch.distributed.launch --nproc_per_node=1 --use_env src/gpt2_ft_sfl.
 
 2. Generate outputs from the trained model using beam search:  
 
-```python
+```bash
 python -m torch.distributed.launch --nproc_per_node=1 src/gpt2_beam.py \
     --data ./data/e2e/test.jsonl \
     --batch_size 1 \
     --seq_len 512 \
     --eval_len 64 \
     --model_card gpt2.md \
-    --init_checkpoint ./trained_models/GPT2_S/e2e/{model.name.pt} \
+    --init_checkpoint ./trained_models/GPT2_M/e2e/{model.name.pt} \
     --platform local \
     --lora_dim 4 \
     --lora_alpha 32 \
@@ -247,13 +163,13 @@ python -m torch.distributed.launch --nproc_per_node=1 src/gpt2_beam.py \
     --no_repeat_ngram_size 4 \
     --repetition_penalty 1.0 \
     --eos_token_id 628 \
-    --work_dir ./trained_models/GPT2_S/e2e \
+    --work_dir ./trained_models/GPT2_M/e2e \
     --output_file predict.26289.b10p08r4.jsonl
 ```
 
 3. Decode outputs from step (2)  
 
-```python
+```bash
 python src/gpt2_decode.py \
     --vocab ./vocab \
     --sample_file ./trained_models/GPT2_M/e2e/predict.26289.b10p08r4.jsonl \
@@ -264,7 +180,7 @@ python src/gpt2_decode.py \
 
 4. Run evaluation on E2E test set
 
-```python
+```bash
 python eval/e2e/measure_scores.py e2e_ref.txt e2e_pred.txt -p
 ```
 ## SplitInfer
