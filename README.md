@@ -37,11 +37,11 @@ SplitLoRA contains the source code of the Python package loralib and  a example 
 
 We have verified in the environment below:
 
-+ OS: Ubuntu 18.04 
++ OS: Ubuntu 22.04 
 
-+ Python: 3.7.16
++ Python: 3.10.0
 
-|    |torch <br> 1.7.1+cu110  |  transformers<br>3.3.1 | spacy | tqdm | tensorboard|progress|
+|    |torch <br> 2.9.1  | transformers<br>4.36.2 | spacy | tqdm | tensorboard|progress|
 |---|:---:|:---:|---|---|---|---|
 
 <i>Note: You still need the original pre-trained checkpoint from [Hugging Face](https://huggingface.co/) to use the LoRA checkpoints.</i>
@@ -95,25 +95,38 @@ We have verified in the environment below:
  model.load_state_dict(torch.load('ckpt_lora.pt'), strict=False)
  ```
 
-##### 1.3 Steps To Reproduce Our Results
+##### 1.3 Installation
 
-1. You can start with the following docker image: `nvcr.io/nvidia/pytorch:20.03-py3` on a GPU-capable machine, but any generic PyTorch image should work.
+1. Clone the repo and set up the environment.
 
- ```python
- docker run -it nvcr.io/nvidia/pytorch:20.03-py3
- ```
+```bash
+conda create -n SplitFM python=3.10 -y
+conda activate SplitFM
+```
 
- 2. Clone the repo and install dependencies in a virtual environment (remove sudo if running in docker container):
+2. Navigate to the `examples` directory and install the required packages.
 
- ```python
- pip install -r requirement.txt
- bash download_pretrained_checkpoints.sh
- bash create_datasets.sh
- cd ./eval
- bash download_evalscript.sh
- cd ..
- ```
-##### Now we are ready to replicate the results 
+```bash
+cd SplitLoRA/examples
+pip install -r requirements.txt
+```
+
+3. Download the necessary pre-trained models, datasets, and evaluation scripts.
+
+```bash
+# Download pre-trained GPT-2 checkpoints
+bash download_pretrained_checkpoints.sh
+
+# Prepare datasets 
+bash create_datasets.sh
+
+# Download evaluation scripts 
+cd ./eval
+bash download_evalscript.sh
+cd ..
+```
+
+#####  Now we are ready to replicate the results 
 
 #### 2 SplitLoRA Module Libraries
 
