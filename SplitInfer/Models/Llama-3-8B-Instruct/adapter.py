@@ -36,12 +36,8 @@ class LlamaAdapter(SplitModelAdapter):
         self.model_client.eval()
         self.model_server.eval()
     
-    def infer(self, input_sentence, **kwargs):
-        max_new_tokens = int(kwargs.get("max_new_tokens") or 150)
-        return_full_text = kwargs.get("return_full_text", True)
-        log_tokens = kwargs.get("log_tokens", True)
+    def _generate_tokens(self, input_sentence, max_new_tokens, log_tokens):
         inputs = self.tokenizer(input_sentence, return_tensors='pt').to('cuda')
-        generated_tokens = []
         if log_tokens:
             print("Split inference token by token:")
         with torch.no_grad():
@@ -52,11 +48,22 @@ class LlamaAdapter(SplitModelAdapter):
                 last_token_logits = logits[:, -1, :]
                 predicted_token_id = torch.argmax(last_token_logits, dim=-1).item()
                 predicted_token = self.tokenizer.decode(predicted_token_id)
-                generated_tokens.append(predicted_token)
                 if log_tokens:
                     print(predicted_token, end="", flush=True)
+                yield predicted_token
                 input_sentence = input_sentence + predicted_token
                 inputs = self.tokenizer(input_sentence, return_tensors='pt').to('cuda')
+
+    def infer(self, input_sentence, **kwargs):
+        max_new_tokens = int(kwargs.get("max_new_tokens") or 150)
+        return_full_text = kwargs.get("return_full_text", True)
+        log_tokens = kwargs.get("log_tokens", True)
+        generated_tokens = list(self._generate_tokens(input_sentence, max_new_tokens, log_tokens))
         if return_full_text:
-            return input_sentence
+            return input_sentence + "".join(generated_tokens)
         return "".join(generated_tokens)
+
+    def stream_infer(self, input_sentence, **kwargs):
+        max_new_tokens = int(kwargs.get("max_new_tokens") or 150)
+        log_tokens = kwargs.get("log_tokens", False)
+        yield from self._generate_tokens(input_sentence, max_new_tokens, log_tokens)

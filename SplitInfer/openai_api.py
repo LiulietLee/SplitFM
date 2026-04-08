@@ -2,7 +2,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 
 ALLOWED_CHAT_REQUEST_KEYS = {
@@ -246,11 +246,14 @@ def build_chat_response(
     }
 
 
-def build_stream_events(model: str, content: str, completion_id: Optional[str] = None) -> List[str]:
+def iter_stream_events(
+    model: str,
+    pieces: Iterable[str],
+    completion_id: Optional[str] = None,
+) -> Iterator[str]:
     created = int(time.time())
     completion_id = completion_id or f"chatcmpl-{uuid.uuid4().hex}"
 
-    events: List[str] = []
     first_chunk = {
         "id": completion_id,
         "object": "chat.completion.chunk",
@@ -264,9 +267,9 @@ def build_stream_events(model: str, content: str, completion_id: Optional[str] =
             }
         ],
     }
-    events.append(f"data: {json.dumps(first_chunk, ensure_ascii=False)}\n\n")
+    yield f"data: {json.dumps(first_chunk, ensure_ascii=False)}\n\n"
 
-    for piece in chunk_text(content):
+    for piece in pieces:
         chunk = {
             "id": completion_id,
             "object": "chat.completion.chunk",
@@ -280,7 +283,7 @@ def build_stream_events(model: str, content: str, completion_id: Optional[str] =
                 }
             ],
         }
-        events.append(f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n")
+        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
     final_chunk = {
         "id": completion_id,
@@ -295,9 +298,12 @@ def build_stream_events(model: str, content: str, completion_id: Optional[str] =
             }
         ],
     }
-    events.append(f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n")
-    events.append("data: [DONE]\n\n")
-    return events
+    yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+def build_stream_events(model: str, content: str, completion_id: Optional[str] = None) -> List[str]:
+    return list(iter_stream_events(model, chunk_text(content), completion_id=completion_id))
 
 
 def chunk_text(text: str, chunk_size: int = 32) -> Iterable[str]:

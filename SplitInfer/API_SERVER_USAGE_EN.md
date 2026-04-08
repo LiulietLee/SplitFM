@@ -57,7 +57,7 @@ uvicorn SplitInfer.api_server:app --host 0.0.0.0 --port 8000
 ```
 
 ### Config file example
-See [api_server.example.json](/Users/_liet/Developer/SplitFM/SplitInfer/api_server.example.json).
+See [api_server.example.json](api_server.example.json).
 
 ```bash
 python SplitInfer/api_server.py --config SplitInfer/api_server.example.json

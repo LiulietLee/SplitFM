@@ -1,5 +1,9 @@
 import unittest
+from tempfile import NamedTemporaryFile
 
+from fastapi.testclient import TestClient
+
+from SplitInfer.api_server import build_arg_parser, create_app
 from SplitInfer.openai_api import (
     OpenAIRequestError,
     build_chat_response,
@@ -7,7 +11,30 @@ from SplitInfer.openai_api import (
     parse_chat_request,
     prepare_inference_input,
 )
-from SplitInfer.server_config import load_server_settings, parse_model_path_overrides
+from SplitInfer.server_config import ServerSettings, load_server_settings, parse_model_path_overrides
+
+
+class FakeService:
+    def __init__(self):
+        self.stream_called = False
+        self.buffered_called = False
+
+    def list_models(self):
+        return ["Llama-3-8B-Instruct"]
+
+    def run_chat_completion(self, model_name, messages, max_tokens, temperature):
+        self.buffered_called = True
+        return {
+            "model": model_name,
+            "content": "buffered response",
+            "prompt_tokens": 3,
+            "completion_tokens": 2,
+        }
+
+    def stream_chat_completion(self, model_name, messages, max_tokens, temperature):
+        self.stream_called = True
+        for piece in ["hello", " ", "stream"]:
+            yield piece
 
 
 class OpenAIAPIHelpersTest(unittest.TestCase):
@@ -85,6 +112,53 @@ class OpenAIAPIHelpersTest(unittest.TestCase):
         self.assertEqual(settings.port, 9000)
         self.assertEqual(settings.weights_root, "/srv/weights")
         self.assertEqual(settings.model_paths["Llama-3-8B-Instruct"], "/srv/llama")
+
+    def test_load_server_settings_keeps_config_host_port_without_cli_overrides(self):
+        with NamedTemporaryFile("w+", suffix=".json") as handle:
+            handle.write('{"host":"127.0.0.1","port":9100}')
+            handle.flush()
+            settings = load_server_settings(config_path=handle.name, cli_overrides={"host": None, "port": None})
+        self.assertEqual(settings.host, "127.0.0.1")
+        self.assertEqual(settings.port, 9100)
+
+    def test_build_arg_parser_keeps_host_port_unset_by_default(self):
+        args = build_arg_parser().parse_args([])
+        self.assertIsNone(args.host)
+        self.assertIsNone(args.port)
+
+    def test_streaming_endpoint_uses_stream_path(self):
+        service = FakeService()
+        client = TestClient(create_app(service=service, settings=ServerSettings()))
+        with client.stream(
+            "POST",
+            "/v1/chat/completions",
+            json={
+                "model": "Llama-3-8B-Instruct",
+                "messages": [{"role": "user", "content": "hello"}],
+                "stream": True,
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(service.stream_called)
+        self.assertFalse(service.buffered_called)
+        self.assertIn('"content": "hello"', body)
+        self.assertTrue(body.rstrip().endswith("data: [DONE]"))
+
+    def test_non_streaming_endpoint_uses_buffered_path(self):
+        service = FakeService()
+        client = TestClient(create_app(service=service, settings=ServerSettings()))
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "Llama-3-8B-Instruct",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(service.buffered_called)
+        self.assertFalse(service.stream_called)
+        self.assertEqual(response.json()["choices"][0]["message"]["content"], "buffered response")
 
 
 if __name__ == "__main__":

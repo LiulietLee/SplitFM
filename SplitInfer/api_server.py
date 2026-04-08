@@ -7,8 +7,8 @@ try:
         OpenAIRequestError,
         build_chat_response,
         build_models_response,
-        build_stream_events,
         estimate_token_count,
+        iter_stream_events,
         parse_chat_request,
         prepare_inference_input,
     )
@@ -19,8 +19,8 @@ except ImportError:
         OpenAIRequestError,
         build_chat_response,
         build_models_response,
-        build_stream_events,
         estimate_token_count,
+        iter_stream_events,
         parse_chat_request,
         prepare_inference_input,
     )
@@ -45,21 +45,7 @@ class SplitInferenceService:
         max_tokens: Optional[int],
         temperature: Optional[float],
     ) -> Dict[str, Any]:
-        if model_name not in MODEL_REGISTRY:
-            raise HTTPException(status_code=404, detail=f"Unknown model `{model_name}`.")
-
-        loaded = self.model_manager.get(model_name)
-        prepared = prepare_inference_input(messages, supports_images=loaded.supports_images)
-
-        infer_kwargs: Dict[str, Any] = {
-            "max_new_tokens": max_tokens,
-            "temperature": temperature,
-            "return_full_text": False,
-            "log_tokens": False,
-        }
-        if prepared.image_url is not None:
-            infer_kwargs["image_path"] = prepared.image_url
-
+        loaded, prepared, infer_kwargs = self._prepare_completion(model_name, messages, max_tokens, temperature)
         content = loaded.adapter.infer(prepared.prompt_text, **infer_kwargs)
         prompt_tokens = estimate_token_count(loaded.tokenizer, prepared.prompt_text)
         completion_tokens = estimate_token_count(loaded.tokenizer, content)
@@ -69,6 +55,38 @@ class SplitInferenceService:
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
         }
+
+    def stream_chat_completion(
+        self,
+        model_name: str,
+        messages,
+        max_tokens: Optional[int],
+        temperature: Optional[float],
+    ):
+        loaded, prepared, infer_kwargs = self._prepare_completion(model_name, messages, max_tokens, temperature)
+        return loaded.adapter.stream_infer(prepared.prompt_text, **infer_kwargs)
+
+    def _prepare_completion(
+        self,
+        model_name: str,
+        messages,
+        max_tokens: Optional[int],
+        temperature: Optional[float],
+    ):
+        if model_name not in MODEL_REGISTRY:
+            raise HTTPException(status_code=404, detail=f"Unknown model `{model_name}`.")
+
+        loaded = self.model_manager.get(model_name)
+        prepared = prepare_inference_input(messages, supports_images=loaded.supports_images)
+        infer_kwargs: Dict[str, Any] = {
+            "max_new_tokens": max_tokens,
+            "temperature": temperature,
+            "return_full_text": False,
+            "log_tokens": False,
+        }
+        if prepared.image_url is not None:
+            infer_kwargs["image_path"] = prepared.image_url
+        return loaded, prepared, infer_kwargs
 
 
 def _openai_error_response(status_code: int, message: str, param: Optional[str] = None, code: Optional[str] = None):
@@ -128,16 +146,25 @@ def create_app(
     @app.post("/v1/chat/completions")
     async def create_chat_completion(payload: Dict[str, Any], _: None = Depends(require_api_key)):
         parsed = parse_chat_request(payload)
+
+        if parsed.stream:
+            token_stream = service.stream_chat_completion(
+                model_name=parsed.model,
+                messages=parsed.messages,
+                max_tokens=parsed.max_tokens,
+                temperature=parsed.temperature,
+            )
+            return StreamingResponse(
+                iter_stream_events(parsed.model, token_stream),
+                media_type="text/event-stream",
+            )
+
         result = service.run_chat_completion(
             model_name=parsed.model,
             messages=parsed.messages,
             max_tokens=parsed.max_tokens,
             temperature=parsed.temperature,
         )
-
-        if parsed.stream:
-            events = build_stream_events(parsed.model, result["content"])
-            return StreamingResponse(iter(events), media_type="text/event-stream")
 
         return build_chat_response(
             model=parsed.model,
@@ -152,15 +179,20 @@ def create_app(
 app = create_app()
 
 
-def main():
+def build_arg_parser():
     parser = argparse.ArgumentParser(description="SplitInfer OpenAI-compatible API server")
-    parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", type=str, default=None)
+    parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--gpu", type=str, default=None, help="CUDA_VISIBLE_DEVICES override for the server process")
     parser.add_argument("--api-key", type=str, default=None, help="Optional static API key")
     parser.add_argument("--weights-root", type=str, default=None, help="Base directory that contains per-model weights folders")
     parser.add_argument("--model-path", action="append", default=None, help="Per-model weights override in MODEL=PATH format; repeatable")
     parser.add_argument("--config", type=str, default=None, help="Optional JSON config file for server settings")
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     settings = load_server_settings(

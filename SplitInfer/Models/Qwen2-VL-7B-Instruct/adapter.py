@@ -32,8 +32,7 @@ class QwenAdapter(SplitModelAdapter):
         self.model_server = self.model_server.half().cuda(1)
         self.lm_head = lm_head.half().cuda(1)
 
-
-    def infer(self, input_sentence, image_path=None, **kwargs):
+    def _generate_tokens(self, input_sentence, image_path, max_new_tokens):
         messages = [
             {
                 "role": "user",
@@ -50,9 +49,7 @@ class QwenAdapter(SplitModelAdapter):
         image_inputs, video_inputs = process_vision_info(messages)
         inputs = self.processor(text=[text], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt").to('cuda:0')
         #============================inference ================================
-        max_new_tokens = int(kwargs.get("max_new_tokens") or 64)
         with torch.no_grad():
-            generated_tokens = []
             for i in range(max_new_tokens): 
                 inputs = self.processor(text=[text], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt").to('cuda:0')
                 hidden_states, causal_mask, position_ids = self.model_client(**inputs)
@@ -65,6 +62,14 @@ class QwenAdapter(SplitModelAdapter):
                 predicted_token_id = torch.argmax(softmax_logits, dim=-1)
                 predicted_token = self.tokenizer.decode(predicted_token_id)
                 text += predicted_token
-                generated_tokens.append(predicted_token)
+                yield predicted_token
+
+    def infer(self, input_sentence, image_path=None, **kwargs):
+        max_new_tokens = int(kwargs.get("max_new_tokens") or 64)
+        generated_tokens = list(self._generate_tokens(input_sentence, image_path, max_new_tokens))
         final_answer = ''.join(generated_tokens)
         return final_answer
+
+    def stream_infer(self, input_sentence, image_path=None, **kwargs):
+        max_new_tokens = int(kwargs.get("max_new_tokens") or 64)
+        yield from self._generate_tokens(input_sentence, image_path, max_new_tokens)

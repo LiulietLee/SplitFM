@@ -37,11 +37,7 @@ class DeepSeekAdapter(SplitModelAdapter):
         self.model_client.eval()
         self.model_server.eval()
 
-
-    def infer(self, input_sentence, **kwargs):
-        max_new_tokens = int(kwargs.get("max_new_tokens") or 150)
-        return_full_text = kwargs.get("return_full_text", True)
-        generated_tokens = []
+    def _generate_tokens(self, input_sentence, max_new_tokens):
         inputs = self.tokenizer(input_sentence, return_tensors='pt').to('cuda')
         with torch.no_grad():
             for i in range(max_new_tokens):
@@ -51,9 +47,18 @@ class DeepSeekAdapter(SplitModelAdapter):
                 last_token_logits = logits[:, -1, :]
                 predicted_token_id = torch.argmax(last_token_logits, dim=-1).item()
                 predicted_token = self.tokenizer.decode(predicted_token_id)
-                generated_tokens.append(predicted_token)
+                yield predicted_token
                 input_sentence = input_sentence + predicted_token
                 inputs = self.tokenizer(input_sentence, return_tensors='pt').to('cuda')
+
+    def infer(self, input_sentence, **kwargs):
+        max_new_tokens = int(kwargs.get("max_new_tokens") or 150)
+        return_full_text = kwargs.get("return_full_text", True)
+        generated_tokens = list(self._generate_tokens(input_sentence, max_new_tokens))
         if return_full_text:
-            return input_sentence
+            return input_sentence + "".join(generated_tokens)
         return "".join(generated_tokens)
+
+    def stream_infer(self, input_sentence, **kwargs):
+        max_new_tokens = int(kwargs.get("max_new_tokens") or 150)
+        yield from self._generate_tokens(input_sentence, max_new_tokens)
