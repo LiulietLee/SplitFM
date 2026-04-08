@@ -33,7 +33,7 @@ class QwenAdapter(SplitModelAdapter):
         self.lm_head = lm_head.half().cuda(1)
 
 
-    def infer(self, input_sentence, image_path=None):
+    def infer(self, input_sentence, image_path=None, **kwargs):
         messages = [
             {
                 "role": "user",
@@ -50,10 +50,10 @@ class QwenAdapter(SplitModelAdapter):
         image_inputs, video_inputs = process_vision_info(messages)
         inputs = self.processor(text=[text], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt").to('cuda:0')
         #============================inference ================================
+        max_new_tokens = int(kwargs.get("max_new_tokens") or 64)
         with torch.no_grad():
             generated_tokens = []
-            max_length = 64
-            for i in range(max_length): 
+            for i in range(max_new_tokens): 
                 inputs = self.processor(text=[text], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt").to('cuda:0')
                 hidden_states, causal_mask, position_ids = self.model_client(**inputs)
                 hidden_states = hidden_states.cuda(0)
